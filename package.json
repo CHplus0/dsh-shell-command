@@ -1,7 +1,7 @@
 {
   "name": "dsh-shell-command",
   "version": "0.1.0",
-  "description": "DeepSeek Harness (DSH) plugin: a /shell slash command that runs a command in the session workspace and shows its output in-conversation (--analyze feeds it to the agent), plus a --terminal mode opening an interactive PTY popup with an exit-time consent gate that injects the transcript into the model.",
+  "description": "DeepSeek Harness (DSH) plugin: a /! command trigger (run one command, analyze output, inspired by Claude Code's ! gesture) and a /terminal command (interactive PTY popup with exit-time consent gate).",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -45,7 +45,6 @@
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-input-trigger": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-commands": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-subprocess": "^0.1.0-rc.6"
   },

@@ -4,24 +4,14 @@ import assert from "node:assert/strict";
 import { parseLine } from "../lib/parse.js";
 import { formatResult, formatSummary } from "../lib/format.js";
 
-// ---- parseLine ----
-assert.deepEqual(parseLine("ls -la"), { kind: "ok", mode: "display", command: "ls -la" });
-assert.deepEqual(parseLine(" ls -la"), { kind: "ok", mode: "display", command: "ls -la" }, "leading separator whitespace");
-assert.deepEqual(parseLine("echo  a  b"), { kind: "ok", mode: "display", command: "echo  a  b" }, "internal spacing preserved");
-
-assert.deepEqual(parseLine("-a ls -la"), { kind: "ok", mode: "analyze", command: "ls -la" });
-assert.deepEqual(parseLine("--analyze git diff"), { kind: "ok", mode: "analyze", command: "git diff" });
-assert.deepEqual(parseLine("-d ls"), { kind: "ok", mode: "display", command: "ls" });
-assert.deepEqual(parseLine("--display ls"), { kind: "ok", mode: "display", command: "ls" });
-
-assert.deepEqual(parseLine("ls -a"), { kind: "ok", mode: "display", command: "ls -a" }, "a command's own -a is never a mode flag");
-assert.deepEqual(parseLine("git log --oneline"), { kind: "ok", mode: "display", command: "git log --oneline" });
-assert.deepEqual(parseLine("ls", "analyze"), { kind: "ok", mode: "analyze", command: "ls" }, "defaultMode applies to bare form");
+// ---- parseLine (simplified: no mode, just extract command) ----
+assert.deepEqual(parseLine("ls -la"), { kind: "ok", command: "ls -la" });
+assert.deepEqual(parseLine(" ls -la"), { kind: "ok", command: "ls -la" }, "leading whitespace");
+assert.deepEqual(parseLine("echo  a  b"), { kind: "ok", command: "echo  a  b" }, "internal spacing preserved");
+assert.deepEqual(parseLine("git log --oneline"), { kind: "ok", command: "git log --oneline" });
 
 assert.deepEqual(parseLine(""), { kind: "usage" });
 assert.deepEqual(parseLine("   "), { kind: "usage" });
-assert.deepEqual(parseLine("-a"), { kind: "usage" }, "mode flag with no command");
-assert.deepEqual(parseLine("--analyze   "), { kind: "usage" });
 
 // ---- formatSummary ----
 assert.equal(formatSummary("echo hi"), "$ echo hi");

@@ -1,6 +1,6 @@
-# The dsh-shell-command bundle patch: activates the /shell slash command as a
-# profile layer. One host-plane row, mounted beside the shipped command plugins
-# (command-compact, command-goal, command-feedback).
+# The dsh-shell-command bundle patch: activates the /! command trigger and /terminal
+# command as a profile layer. One host-plane row, mounted beside the shipped
+# command plugins.
 #
 # Every key below is optional; these are the defaults. Override them from the
 # profile's own cordis.patch.yml (a patch replaces a row's whole `config`, so
@@ -24,12 +24,10 @@
         # SIGTERM -> grace -> SIGKILL escalation window when ctx.subprocess runs
         # the command.
         graceMs: 3000
-        # Bare `/shell <cmd>` mode when no leading -a/--analyze or -d/--display.
-        defaultMode: display
-        # Mode-2 prompt template. Supports {command}, {cwd}, {output} placeholders.
-        # Empty string uses the built-in Chinese prompt.
+        # Analysis prompt template for the /! trigger. Supports {command}, {cwd},
+        # {output} placeholders. Empty string uses the built-in Chinese prompt.
         analysisPrompt: ''
-        # Multi-command terminal mode (/shell --terminal). Set false to disable.
+        # Multi-command terminal mode (/terminal). Set false to disable.
         terminalEnabled: true
         # In-memory terminal transcript cap (tail retained on overflow).
         terminalMaxTranscriptBytes: 1048576

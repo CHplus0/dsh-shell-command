@@ -4,7 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) plugin. It adds a `/shell` slash command (run one command, show output, optionally hand it to the model for analysis) and a `/terminal` command (interactive PTY popup with an exit-time consent gate) to the DSH web GUI. Conceptually this mirrors Claude Code's `!` gesture, split into explicit modes since a bare `!` prefix isn't practical in a chat input box.
+A [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) plugin. It adds:
+
+1. A `/!` command (run one shell command, analyze output, inspired by Claude Code's `!` gesture)
+2. A `/terminal` command (interactive PTY popup with an exit-time consent gate)
+
+**Note**: DSH's input trigger system only supports `/` and `@` as trigger characters (hardcoded in `dsh-client-ui-input-trigger/lib/types/types.d.ts`). We cannot use a bare `!` prefix like Claude Code does, so we use `/!` instead.
 
 Not a git repository (no `.git`) — this is a working checkout, not something to run `git log`/`git diff` against for history.
 
@@ -29,16 +34,25 @@ To exercise the plugin live, install it into a profile (`dsh plugin --profile we
 
 ## Architecture
 
-### Two independent host-side execution paths
+### Two independent execution paths
 
-1. **Single-command (`/shell`)** — `lib/index.js` registers the command via `ctx.commands.register`. Handler flow: `parse.js` → `exec.js` → `format.js`, and in analyze mode, `message.js` → `agent.followup`. This path only needs the `commands` service; it works even if terminal mode is disabled or unavailable.
-2. **Multi-command terminal (`/terminal`)** — assembled by `setupTerminalMode` in `lib/rpc.js`, which lazily imports `node-pty` and `ws`. If those (or the `connection`/`agents`/`webServer` services) are missing, terminal mode disables itself with a warning and the `/shell` path stays fully functional. Never let a terminal-mode failure take down the whole plugin — this degrade-gracefully contract is intentional, preserve it when editing `rpc.js`.
+1. **Single-command (`/!`)** — Client-side input trigger (lib/client.js) registers under `trigger: "/"`, name-matched to `!` (candidates/matchSpace/matchEnter all key off the literal `/!` token). Handler flow: user types `/! ls` → client calls RPC `/shell-bang-rpc` → host (lib/index.js) does `parse.js` → `exec.js` → `format.js` → `message.js` → `agent.followup`. This path requires `connection` and `agents` services. It checks `agent.session.requestHeader()` — if the session has no model request context yet, it refuses with an error message (mirroring dsh-btw behavior).
 
-`/terminal` is a **separate** top-level command, not a `/shell --terminal` flag — it was originally planned as a flag but that collided with the host command directory's `matchEnter` claim priority (registered earlier, higher priority), documented in `开发进度.md`.
+2. **Multi-command terminal (`/terminal`)** — assembled by `setupTerminalMode` in `lib/rpc.js`, which lazily imports `node-pty` and `ws`. If those (or the `connection`/`agents`/`webServer` services) are missing, terminal mode disables itself with a warning and the `/!` path stays fully functional. Never let a terminal-mode failure take down the whole plugin — this degrade-gracefully contract is intentional, preserve it when editing `rpc.js`.
+
+`/terminal` and `/!` are both registered under `trigger: "/"` with distinct `name`s — DSH's input trigger system only supports `/` and `@` as physical trigger characters (see `TriggerChar` in `dsh-client-ui-input-trigger`), so a bare `!` prefix is not possible.
 
 ### Mode parsing (`lib/parse.js`)
 
-Only the **first whitespace-delimited token** of the raw input is checked against `-a`/`--analyze`/`-d`/`--display`. Everything after that is the verbatim command line, unparsed. This means `/shell ls -a` runs `ls -a` (the command's own flag), while `/shell -a ls` analyzes `ls`. Do not "improve" this into full argv parsing — the single-token check is what keeps a command's own flags from being misread as plugin flags.
+Simplified: only extracts the command text from the input. No mode flags anymore — the `/!` trigger always analyzes output (that's its purpose).
+
+### Client-side input triggers (`lib/client.js`)
+
+Two input trigger sources registered via `inputTriggers.registerSource`:
+
+1. **`/!` command trigger** (`createBangSource`): `trigger: "/"`, `name: "shell-bang"`, implements `candidates`/`onPick`/`matchSpace`/`matchEnter`. Candidates filter: only shows when `request.query` starts with `!`. On submit, calls RPC `/shell-bang-rpc` with the command text. The RPC result determines success/error shown to the user.
+
+2. **`/terminal` trigger** (`createTerminalSource`): `trigger: "/"`, `name: "terminal"`, name-matched to `/terminal`. Implements the full contract, `matchEnter` returns a Promise. Opens the terminal popup via `TerminalController.open()`.
 
 ### Execution backends (`lib/exec.js`)
 
@@ -47,6 +61,15 @@ Only the **first whitespace-delimited token** of the raw input is checked agains
 - `node:child_process` fallback (used when the seam is absent): scrubbed env via `scrubbedParentEnv()` from `@deepseek-ai/dsh-subprocess`, in-memory bounded buffers, process-level (not tree-level) kill.
 
 Timeout vs. cancellation is always classified from the caller-owned `AbortSignal`s (`timeoutSignal.aborted` / `signal.aborted`), never inferred from exit code/signal — keep that ordering if you touch the outcome-normalization tail of `runCommand`.
+
+### RPC handling (`lib/index.js`)
+
+The `/!` trigger's RPC handler (`/shell-bang-rpc`) is registered via `connection.rpc.handle`. It:
+1. Resolves the agent from the session ID.
+2. Checks `agent.session.requestHeader()` — if undefined, rejects with "No model request exists yet. Send a message before using /! commands."
+3. Parses the command (via `parse.js`), runs it (via `exec.js`), formats the output (via `format.js`), and injects the analysis message (via `message.js` and `agent.followup`).
+
+This design aligns with dsh-btw: the trigger only works in sessions that have already sent a model request, which naturally avoids the UI rendering-timing bug that affected the old `/shell` display mode.
 
 ### Terminal mode data flow (`lib/terminal.js` + `lib/rpc.js`)
 
@@ -63,7 +86,7 @@ Every message built for `agent.followup`/`agent.inject` carries `source: { kind:
 
 ### Client bundle (`lib/client.js`)
 
-Hand-authored, no build step, loaded via `window.__ModuleLoader__.load`. Registers the `/terminal` input trigger (must implement the full `candidates`/`onPick`/`matchSpace`/`matchEnter` contract — `matchEnter` must return a Promise), renders the terminal popup as React mounted on the `conversation.input.dock` slot, and does its own minimal ANSI/SGR-to-`<span>` color rendering (`renderAnsi`) rather than pulling in a terminal-emulation library. It's currently line-oriented (scrollback + input line), not full VT100/xterm — `vim`/`htop`/progress bars/`resize` are known-unsupported, with an xterm.js migration noted as the follow-up in `开发进度.md`.
+Hand-authored, no build step, loaded via `window.__ModuleLoader__.load`. Registers both input trigger sources described above. The terminal popup renders as React mounted on the `conversation.input.dock` slot, and does its own minimal ANSI/SGR-to-`<span>` color rendering (`renderAnsi`) rather than pulling in a terminal-emulation library. It's currently line-oriented (scrollback + input line), not full VT100/xterm — `vim`/`htop`/progress bars/`resize` are known-unsupported, with an xterm.js migration noted as the follow-up in `开发进度.md`.
 
 ### Config
 

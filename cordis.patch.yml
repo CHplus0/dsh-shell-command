@@ -1,0 +1,41 @@
+# The dsh-shell-command bundle patch: activates the /shell slash command as a
+# profile layer. One host-plane row, mounted beside the shipped command plugins
+# (command-compact, command-goal, command-feedback).
+#
+# Every key below is optional; these are the defaults. Override them from the
+# profile's own cordis.patch.yml (a patch replaces a row's whole `config`, so
+# restate the complete config when overriding).
+- insert:
+    - id: shell-command
+      name: dsh-shell-command
+      config:
+        # Empty string selects the platform default: /bin/bash on POSIX,
+        # cmd.exe on Windows. Set an absolute path (or a PATH-resolvable name
+        # when ctx.subprocess is available) to use another shell, e.g. /bin/zsh
+        # or pwsh.
+        shell: ''
+        # Empty array selects the platform default args:
+        # POSIX `-lc`; Windows `cmd.exe /d /s /c`.
+        shellArgs: []
+        # Hard deadline for one command; the process tree is terminated on expiry.
+        timeoutMs: 60000
+        # In-memory output cap per stream (tail retained on overflow).
+        maxOutputBytes: 32768
+        # SIGTERM -> grace -> SIGKILL escalation window when ctx.subprocess runs
+        # the command.
+        graceMs: 3000
+        # Bare `/shell <cmd>` mode when no leading -a/--analyze or -d/--display.
+        defaultMode: display
+        # Mode-2 prompt template. Supports {command}, {cwd}, {output} placeholders.
+        # Empty string uses the built-in Chinese prompt.
+        analysisPrompt: ''
+        # Multi-command terminal mode (/shell --terminal). Set false to disable.
+        terminalEnabled: true
+        # In-memory terminal transcript cap (tail retained on overflow).
+        terminalMaxTranscriptBytes: 1048576
+        # Bytes of (stripped) transcript injected into the model on "yes".
+        terminalInjectMaxBytes: 32768
+        # Workspace-relative directory where exited terminal transcripts persist.
+        terminalTranscriptDir: '.dsh-shell-transcripts'
+        # Max persisted transcript files kept per session id.
+        terminalTranscriptKeep: 10

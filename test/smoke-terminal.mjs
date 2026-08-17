@@ -65,11 +65,14 @@ const followup = buildFollowupMessage({
 	exitCode: 0,
 	notes: "请重点看第一行",
 	injectMaxBytes: 1024,
+	transcriptPath: "/tmp/example.log",
 });
 assert.equal(followup.role, "user");
 assert.equal(followup.source.kind, "plugin");
 assert.match(followup.content[0].text, /用户补充说明：请重点看第一行/);
 assert.doesNotMatch(followup.content[0].text, /\x1b\[31m/, "ANSI stripped from followup");
+assert.match(followup.content[0].text, /\/tmp\/example\.log/, "followup names its own transcript path");
+assert.match(followup.content[0].text, /不要一并读取或混入分析/, "followup tells the model not to cross-reference other terminal sessions");
 
 const pointer = buildPointerMessage({ cwd, transcriptPath: path, bytes: 42 });
 assert.equal(pointer.role, "user");
@@ -122,6 +125,38 @@ assert.match(injects[0].content[0].text, /转录已保存/);
 const missing = await rpcHandler("open", { sessionId: "nope" });
 assert.equal(missing.ok, false);
 assert.equal(missing.error.code, "session-not-found");
+
+// ---- history tab: list / read / reference-inject ----
+// sess-2 has two persisted transcripts by now (the "yes" close and the "no" close above).
+const historyListRes = await rpcHandler("historyList", { sessionId: "sess-2" });
+assert.equal(historyListRes.ok, true);
+assert.equal(historyListRes.value.entries.length, 2, "two persisted transcripts for sess-2");
+const [newest, older] = historyListRes.value.entries;
+assert.ok(newest.timestamp >= older.timestamp, "newest first");
+assert.equal(older.injected, true, "first close (inject=yes) recorded in sidecar");
+assert.equal(newest.injected, false, "second close (inject=no) recorded in sidecar");
+
+const historyReadRes = await rpcHandler("historyRead", { sessionId: "sess-2", path: older.path });
+assert.equal(historyReadRes.ok, true);
+assert.match(historyReadRes.value.transcript, /ls -la/);
+
+const historyReadBad = await rpcHandler("historyRead", { sessionId: "sess-2", path: "/etc/passwd" });
+assert.equal(historyReadBad.ok, false, "path not owned by this session is rejected");
+
+const historyInjectRes = await rpcHandler("historyInject", {
+	sessionId: "sess-2",
+	paths: [older.path, newest.path],
+	notes: "对比一下这两次的输出",
+});
+assert.equal(historyInjectRes.ok, true);
+assert.equal(historyInjectRes.value.referenced, 2);
+assert.equal(injects.length, 2, "history reference adds one more inject (non-waking)");
+assert.match(injects[1].content[0].text, /对比一下这两次的输出/);
+assert.match(injects[1].content[0].text, /历史记录/);
+assert.equal(followups.length, 1, "history reference never wakes the model via followup");
+
+const historyInjectEmpty = await rpcHandler("historyInject", { sessionId: "sess-2", paths: [] });
+assert.equal(historyInjectEmpty.ok, false, "empty selection rejected");
 
 rmSync(cwd, { recursive: true, force: true });
 console.log("SMOKE-TERMINAL TEST DONE");

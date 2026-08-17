@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { createTerminalManager } from "../lib/terminal.js";
-import { buildFollowupMessage, buildPointerMessage, tailTranscript, stripAnsi } from "../lib/inject.js";
+import { buildFollowupMessage, buildPointerMessage, buildCloseNotesMessage, buildHistoryNotesMessage, tailTranscript, stripAnsi } from "../lib/inject.js";
 import { registerTerminalRpc } from "../lib/rpc.js";
 
 const cwd = mkdtempSync(join(tmpdir(), "shell-term-smoke-"));
@@ -63,16 +63,27 @@ const followup = buildFollowupMessage({
 	transcript: "\x1b[31mred\x1b[0m output\n",
 	truncated: false,
 	exitCode: 0,
-	notes: "请重点看第一行",
 	injectMaxBytes: 1024,
 	transcriptPath: "/tmp/example.log",
 });
 assert.equal(followup.role, "user");
 assert.equal(followup.source.kind, "plugin");
-assert.match(followup.content[0].text, /用户补充说明：请重点看第一行/);
 assert.doesNotMatch(followup.content[0].text, /\x1b\[31m/, "ANSI stripped from followup");
 assert.match(followup.content[0].text, /\/tmp\/example\.log/, "followup names its own transcript path");
 assert.match(followup.content[0].text, /不要一并读取或混入分析/, "followup tells the model not to cross-reference other terminal sessions");
+
+const closeNotesWithText = buildCloseNotesMessage("请重点看第一行");
+assert.equal(closeNotesWithText.role, "user");
+assert.equal(closeNotesWithText.source.kind, "user", "notes render as an ordinary chat bubble, not a plugin notice");
+assert.equal(closeNotesWithText.content[0].text, "请重点看第一行");
+
+const closeNotesDefault = buildCloseNotesMessage("");
+assert.equal(closeNotesDefault.source.kind, "user");
+assert.match(closeNotesDefault.content[0].text, /我刚结束了一个终端会话，请帮我分析/, "empty notes fall back to a default account");
+
+const historyNotesDefault = buildHistoryNotesMessage(undefined);
+assert.equal(historyNotesDefault.source.kind, "user");
+assert.match(historyNotesDefault.content[0].text, /请帮我对比分析这些历史终端记录/);
 
 const pointer = buildPointerMessage({ cwd, transcriptPath: path, bytes: 42 });
 assert.equal(pointer.role, "user");
@@ -105,21 +116,25 @@ const openRes = await rpcHandler("open", { sessionId: "sess-2", cols: 100, rows:
 assert.equal(openRes.ok, true);
 manager.write("sess-2", "ls -la\n");
 
-// close with inject=yes + notes
+// close with inject=yes + notes: split into two messages — notes via
+// agent.inject (queued, no wake) followed by the transcript via
+// agent.followup (wakes) — one wake, two ordinary chat bubbles.
 const closeYes = await rpcHandler("close", { sessionId: "sess-2", inject: true, notes: "看一下权限" });
 assert.equal(closeYes.ok, true);
 assert.equal(followups.length, 1, "followup fired once for yes");
 assert.match(followups[0].content[0].text, /ls -la/);
-assert.match(followups[0].content[0].text, /看一下权限/);
-assert.equal(injects.length, 0);
+assert.doesNotMatch(followups[0].content[0].text, /看一下权限/, "notes no longer embedded in the transcript message");
+assert.equal(injects.length, 1, "notes queued via inject alongside the followup");
+assert.equal(injects[0].content[0].text, "看一下权限");
+assert.equal(injects[0].source.kind, "user", "notes render as an ordinary chat bubble");
 
 // reopen + close with inject=no
 await rpcHandler("open", { sessionId: "sess-2", cols: 80, rows: 24 });
 manager.write("sess-2", "pwd\n");
 const closeNo = await rpcHandler("close", { sessionId: "sess-2", inject: false });
 assert.equal(closeNo.ok, true);
-assert.equal(injects.length, 1, "pointer injected for no");
-assert.match(injects[0].content[0].text, /转录已保存/);
+assert.equal(injects.length, 2, "pointer injected for no");
+assert.match(injects[1].content[0].text, /转录已保存/);
 
 // unknown session
 const missing = await rpcHandler("open", { sessionId: "nope" });
@@ -143,6 +158,8 @@ assert.match(historyReadRes.value.transcript, /ls -la/);
 const historyReadBad = await rpcHandler("historyRead", { sessionId: "sess-2", path: "/etc/passwd" });
 assert.equal(historyReadBad.ok, false, "path not owned by this session is rejected");
 
+// historyInject also splits, and wakes the model (same "notes via inject,
+// pointer via followup" pairing as the close consent gate's "yes" path).
 const historyInjectRes = await rpcHandler("historyInject", {
 	sessionId: "sess-2",
 	paths: [older.path, newest.path],
@@ -150,10 +167,12 @@ const historyInjectRes = await rpcHandler("historyInject", {
 });
 assert.equal(historyInjectRes.ok, true);
 assert.equal(historyInjectRes.value.referenced, 2);
-assert.equal(injects.length, 2, "history reference adds one more inject (non-waking)");
-assert.match(injects[1].content[0].text, /对比一下这两次的输出/);
-assert.match(injects[1].content[0].text, /历史记录/);
-assert.equal(followups.length, 1, "history reference never wakes the model via followup");
+assert.equal(injects.length, 3, "history reference adds one more inject (the notes)");
+assert.equal(injects[2].content[0].text, "对比一下这两次的输出");
+assert.equal(injects[2].source.kind, "user", "history notes render as an ordinary chat bubble");
+assert.equal(followups.length, 2, "history reference wakes the model via followup");
+assert.match(followups[1].content[0].text, /历史记录/);
+assert.doesNotMatch(followups[1].content[0].text, /对比一下这两次的输出/, "notes no longer embedded in the pointer message");
 
 const historyInjectEmpty = await rpcHandler("historyInject", { sessionId: "sess-2", paths: [] });
 assert.equal(historyInjectEmpty.ok, false, "empty selection rejected");

@@ -31,8 +31,6 @@
         terminalEnabled: true
         # In-memory terminal transcript cap (tail retained on overflow).
         terminalMaxTranscriptBytes: 1048576
-        # Bytes of (stripped) transcript injected into the model on "yes".
-        terminalInjectMaxBytes: 32768
         # Workspace-relative directory where exited terminal transcripts persist.
         terminalTranscriptDir: '.dsh-shell-transcripts'
         # Max persisted transcript files kept per session id.

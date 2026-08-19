@@ -5,6 +5,14 @@
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CHplus0/dsh-shell-command.git"
+  },
+  "homepage": "https://github.com/CHplus0/dsh-shell-command#readme",
+  "bugs": {
+    "url": "https://github.com/CHplus0/dsh-shell-command/issues"
+  },
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",

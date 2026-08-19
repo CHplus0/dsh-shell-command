@@ -19,7 +19,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-      - run: npm install --no-save @deepseek-ai/dsh-llm @deepseek-ai/dsh-subprocess @deepseek-ai/schemastery
+      # Installed in a scratch dir, not the repo root: this package.json's own
+      # peerDependencies (client-only @deepseek-ai/* packages included) make
+      # npm's arborist either crash or silently drop the packages we actually
+      # asked for when they're installed alongside it.
+      - run: |
+          mkdir /tmp/peer-install && cd /tmp/peer-install
+          npm init -y >/dev/null
+          npm install --no-save @deepseek-ai/dsh-llm @deepseek-ai/dsh-subprocess @deepseek-ai/schemastery
+          cp -r node_modules "$GITHUB_WORKSPACE/node_modules"
       - run: node test/unit.mjs
       - run: node test/smoke.mjs
       - run: node test/smoke-terminal.mjs

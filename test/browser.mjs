@@ -12,6 +12,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createTerminalManager } from "../lib/terminal.js";
 import { registerTerminalRpc, registerTerminalWs } from "../lib/rpc.js";
 import { apply as applyShell } from "../lib/index.js";
+import { stripAnsi } from "../lib/inject.js";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const cwd = mkdtempSync(join(tmpdir(), "dsh-xterm-browser-"));
@@ -105,7 +106,12 @@ try {
     await page.locator(".xterm-helper-textarea").focus();
     await page.keyboard.type(line);
     await page.keyboard.press("Enter");
-    if (waitPrompt) await waitFor(() => manager.get(agent.id)?.transcript.slice(start).includes("\r\nDSH_TEST> "), `prompt after ${line}`);
+    if (waitPrompt) await waitFor(() => {
+      // Bash 5 (Linux) places bracketed-paste mode controls and an extra CR
+      // between the echoed newline and the prompt, unlike macOS Bash 3.
+      const tail = manager.get(agent.id)?.transcript.slice(start) ?? "";
+      return stripAnsi(tail).replace(/\r/g, "").includes("\nDSH_TEST> ");
+    }, `prompt after ${line}`);
     if (expected) await waitFor(async () => (await screen()).split("\n").includes(expected), `output line ${expected}`);
   };
   const checkChromeContrast = async () => {

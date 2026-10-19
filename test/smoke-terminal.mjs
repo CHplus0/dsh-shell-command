@@ -92,6 +92,7 @@ assert.match(historyNotesDefault.content[0].text, /请帮我分别分析这些�
 
 // pure helpers
 assert.equal(stripAnsi("\x1b[31mred\x1b[0m"), "red");
+assert.equal(stripAnsi("\x1b]0;first\x1b\\visible text\x1b]0;second\x1b\\"), "visible text", "OSC title changes cannot swallow intervening output");
 assert.equal(tailTranscript("0123456789", 5).truncated, true);
 
 // ---- close / history RPC flow ----
@@ -185,6 +186,12 @@ assert.doesNotMatch(followups[0].content[0].text, /对比一下这两次的输�
 
 const historyInjectEmpty = await rpcHandler("historyInject", { sessionId: "sess-2", paths: [] });
 assert.equal(historyInjectEmpty.ok, false, "empty selection rejected");
+const invalidMixed = await rpcHandler("historyInject", { sessionId: "sess-2", paths: [older.path, "/not-owned.log"] });
+assert.equal(invalidMixed.ok, false, "a mixed or stale selection must not silently analyze a subset");
+assert.equal(followups.length, 1);
+assert.equal(injects.length, 1);
+const duplicates = await rpcHandler("historyInject", { sessionId: "sess-2", paths: [older.path, older.path] });
+assert.equal(duplicates.value.referenced, 1, "a repeated path is referenced once");
 
 rmSync(cwd, { recursive: true, force: true });
 console.log("SMOKE-TERMINAL TEST DONE");

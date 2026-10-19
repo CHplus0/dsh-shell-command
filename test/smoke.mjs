@@ -18,10 +18,12 @@ const dir = mkdtempSync(join(tmpdir(), "shell-cmd-smoke-"));
 
 let rpcHandler;
 const followups = [];
+const audit = [];
 const agent = {
 	id: "smoke-1",
 	session: {
 		header: { cwd: dir },
+		append(type, data) { audit.push({ type, data }); },
 		requestHeader() {
 			return { cwd: dir };
 		},
@@ -77,6 +79,9 @@ assert.equal(followups[0].source.kind, "plugin");
 assert.equal(followups[0].source.plugin, "shell-command");
 assert.match(followups[0].content[0].text, /hello/);
 assert.match(followups[0].content[0].text, /exit code 0/);
+assert.deepEqual(audit.map(event => event.type), ["command/run", "command/done"]);
+assert.equal(audit[0].data.args, "printf hello");
+assert.equal(audit[0].data.commandId, audit[1].data.commandId);
 
 // Another command
 await invoke("printf world");
@@ -104,6 +109,8 @@ const r7 = await invoke("sleep 5");
 assert.equal(r7.ok, true);
 assert.match(followups[4].content[0].text, /timed out after 1500ms/);
 assert.ok(Date.now() - started < 5000, "timeout fired promptly");
+await invoke("pwd");
+assert.ok(followups.at(-1).content[0].text.includes(dir), "command runs in the receiving session workspace");
 
 // session without followup (to test that RPC properly checks for it)
 const agentNoFollowup = {
@@ -145,9 +152,10 @@ const ctxNoFollowupApplied = {
 };
 apply(ctxNoFollowupApplied, { terminalEnabled: false });
 
-// This should work now - no requestHeader check
+// A new conversation must be rejected before any shell side effect.
 const r8 = await rpcHandlerNoFollowup("run", { sessionId: "no-followup", command: "echo test" }, signal);
-assert.equal(r8.ok, true, "command should execute without requestHeader check");
+assert.equal(r8.ok, false);
+assert.match(r8.error.message, /No model request exists yet/);
 
 rmSync(dir, { recursive: true, force: true });
 console.log("SMOKE TEST DONE");

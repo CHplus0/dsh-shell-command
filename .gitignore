@@ -3,3 +3,5 @@ node_modules/
 *.meta.json
 .DS_Store
 .dsh-shell-transcripts/
+.claude/settings.local.json
+release-artifacts/

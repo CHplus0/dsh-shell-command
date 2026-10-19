@@ -25,6 +25,30 @@ dsh plugin --profile web add "link:/path/to/dsh-shell-command"
 
 Restart the web surface once (`dsh web`) so the host-side command loads. It appears in the input `/` menu automatically.
 
+### Local link dependencies
+
+A `link:` install links the source checkout without installing its dependencies.
+Initialize a DSH web profile first, then run this in the checkout:
+
+```sh
+npm run setup:local
+npm test
+dsh web
+```
+
+The setup command installs dependencies, builds the browser entry, and links host peers from
+`$DSH_HOME/profiles/node_modules` (default: `~/.dsh/profiles/node_modules`). It
+checks existing peer paths and refuses to overwrite a different package or broken
+link. Use `npm run setup:local -- --skip-install` when dependencies are already
+available, including after an offline recovery.
+
+Browser peers are optional npm peers because DSH supplies the client services;
+DSH 0.1.1-rc.2 bundles `ui-slots` in its browser frontend. The client still
+requires those services. Setup verifies the plugin, `ws`, and native `node-pty`
+imports; also open `/terminal` and execute a command to check the real PTY.
+Installing `schemastery` globally or setting `NODE_PATH` does not fix ESM imports
+from a checkout with missing dependencies.
+
 ## Quick Start
 
 ### Your first `/!` command
@@ -106,10 +130,12 @@ You decide later whether to reference it for analysis (see History Tab workflow 
 
 #### Session Tab Features
 
-- **Line-oriented terminal**: monospace scrollback + input line
-- **Control keys**: Ctrl+C/D/Z send raw control bytes to the shell
-- **Command history**: ArrowUp/ArrowDown recall previously-submitted lines (client-side, max 500 entries)
-- **Limitations**: Tab-completion not supported; full VT100/xterm (vim, htop) planned for future release
+- **Full interaction**: xterm.js streams keystrokes to the PTY; supports vim, htop, and ncurses applications
+- **Control keys**: Ctrl+C interrupts, Ctrl+D sends EOF, Ctrl+Z suspends through the shell
+- **Completion and history**: Tab, arrow history, and line editing use the shell itself
+- **Input and display**: IME composition, Unicode paste, ANSI colors, cursor movement, and progress overwrite
+- **Resize**: the PTY follows the floating panel dimensions; switching tabs preserves the emulator
+- **Exit and disconnect**: natural shell exit persists history; disconnect disables input until the session is closed and reopened
 
 #### History Tab Workflow
 
@@ -200,7 +226,7 @@ Model: Comparing the three build runs: Run 2 was 3x faster due to npm cache...
 
 - **Choose the right tool**: Use `/!` for single commands where you want immediate feedback; use `/terminal` for exploratory workflows
 - **Empty sessions don't persist**: If you open `/terminal` but don't type anything, it won't create a history entry (by design)
-- **Arrow keys are your friend**: In the terminal input line, ↑/↓ recalls your last 500 commands (client-side, session-scoped)
+- **Completion and history**: Use Tab and ↑/↓ directly in the terminal; the shell controls history persistence
 - **Notes add context**: A good note ("Compare error messages" or "Focus on performance metrics") helps the model analyze more effectively
 - **Selective analysis**: You don't have to analyze every terminal session — only reference what's relevant to your current question
 - **History is per-session**: Each DSH conversation has its own terminal history; they don't mix
@@ -248,6 +274,26 @@ mkdir -p node_modules/@deepseek-ai
 ln -s "$HOME/.dsh/profiles/node_modules/@deepseek-ai/"* node_modules/@deepseek-ai/
 ```
 
+### Browser build and interaction tests
+
+Edit browser sources under `src/`; `lib/client.js` is the committed, shipped build artifact.
+Source builds require Node 22.18+, 24.11+, or 26+ for tsdown; the shipped runtime keeps Node >=22 support.
+After client edits:
+
+```sh
+npm run build
+npm test
+npx playwright install chromium
+npm run test:browser
+```
+
+The tsdown build embeds xterm, FitAddon, and CSS in one DSH loader entry; React and
+DSH services remain host-provided. Browser tests exercise the generated bundle
+against a real bash PTY in a temporary workspace and need Chromium plus local
+server permissions. They also exercise vim/htop when installed.
+Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to use an existing Chromium installation.
+Local setup builds source checkouts; registry installs use the shipped artifact.
+
 ## FAQ
 
 **Q: When should I use `/!` vs `/terminal`?**  
@@ -262,14 +308,14 @@ A: In `<workspace>/.dsh-shell-transcripts/`, one `.log` file per session plus a 
 **Q: Can I delete history entries manually?**  
 A: Yes, just delete the `.log` and `.meta.json` files from `.dsh-shell-transcripts/`. The History tab reads from disk on each open.
 
-**Q: Why doesn't vim/htop/ncurses work in `/terminal`?**  
-A: The current terminal is line-oriented (scrollback + input line), not a full VT100/xterm emulator. Full terminal emulation (using xterm.js) is planned for a future release — it requires introducing a build pipeline.
+**Q: Can I run vim/htop/ncurses in `/terminal`?**
+A: The Session tab now uses xterm.js and supports these applications when installed on the host.
 
 **Q: Do the arrow-key command recalls persist across sessions?**  
-A: The ↑/↓ history is client-side and resets when you close the browser tab or the panel. It's scoped to the current terminal window, not saved to disk.
+A: ↑/↓ uses shell history. History files and persistence across sessions follow your shell configuration.
 
 **Q: What's the difference between "引用并分析" and just asking about the commands in chat?**  
-A: "引用并分析" sends the actual command transcripts (output, timestamps, exit codes) to the model as structured data. Asking in chat relies on your description, which may miss details. Use reference-and-analyze when you want the model to see the raw output.
+A: "引用并分析" sends your notes plus file references, timestamps and exit codes. The model is instructed to read the selected transcript files for the original output. Asking in chat relies on your description, which may miss details.
 
 **Q: Can I reference transcripts from a previous DSH conversation?**  
 A: No. Terminal history is session-scoped. Each DSH conversation has its own `.dsh-shell-transcripts/` namespace, and the History tab only shows entries from the current session ID.
@@ -283,17 +329,13 @@ A: `/!` requires an active model conversation. Send at least one message to the 
 ## Limitations
 
 - The `/!` output is delivered as a plugin-sourced message (visible in the conversation)
-- Terminal mode: line-oriented display only (vim/htop require full xterm emulation, planned for a future release)
+- History files retain bounded raw terminal bytes, including cursor and full-screen control sequences; history previews are logs, not screen recordings.
+- Page refresh replays the bounded transcript. After truncation, previous cursor/full-screen state may not be completely reconstructable.
 - API surface targets `@deepseek-ai/dsh` `0.1.0-rc.x`; pin peers and re-verify on DSH upgrades
 
 ## Future Roadmap
 
 We're planning several enhancements for future releases:
-
-### Full terminal emulation (xterm.js migration)
-- **Current**: Line-oriented terminal (scrollback + input line)
-- **Goal**: Full VT100/xterm emulation supporting vim, htop, ncurses apps, oh-my-posh, and other rich terminal UIs
-- **Requires**: Introducing a build pipeline (webpack/vite) to bundle xterm.js and its addons
 
 ### Internationalization (i18n)
 - Multi-language UI support (English, Chinese, etc.)

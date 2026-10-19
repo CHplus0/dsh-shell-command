@@ -19,11 +19,35 @@
 # 从 npm / 仓库安装
 dsh plugin --profile web add dsh-shell-command
 
-# 本地源码（开发用 live link，改源码重启即生效）
+# 本地源码（开发用 live link，客户端改动需构建后重启）
 dsh plugin --profile web add "link:/path/to/dsh-shell-command"
 ```
 
 安装后重启一次 Web 界面（`dsh web`）让 host 端命令加载；它会自动出现在输入框 `/` 菜单中。
+
+### 本地 link 安装的依赖恢复
+
+`link:` 只链接源码，不会安装源码目录的依赖。若启动时出现
+`Cannot find package '@deepseek-ai/schemastery'`，先初始化 DSH web profile，
+然后在本插件目录执行：
+
+```sh
+cd /path/to/dsh-shell-command
+npm run setup:local
+npm test
+dsh web
+```
+
+初始化命令安装插件自身依赖、构建浏览器入口，再从 `${DSH_HOME:-~/.dsh}/profiles/node_modules`
+链接宿主 peer 包。它检查已有链接，不会覆盖不同的 peer 包或断开的链接。
+DSH 0.1.1-rc.2 的 `ui-slots` 已内置在浏览器 bundle 中，无需单独安装；
+浏览器 peer 在清单中标记为 optional，仍需宿主提供对应客户端服务。
+
+依赖已经安装时（例如离线恢复后），使用 `npm run setup:local -- --skip-install`；
+该命令仍会检查插件入口、`ws` 和原生 `node-pty` 能否导入。
+`node-pty` 导入成功后还需要在 Web 界面打开 `/terminal` 并执行命令验证。
+macOS 上的编译失败应先检查安装日志和 Command Line Tools；ESM 导入不通过
+`NODE_PATH` 查找依赖，全局安装 `schemastery` 不能替代本地初始化。
 
 ## 快速上手
 
@@ -106,10 +130,12 @@ dsh plugin --profile web add "link:/path/to/dsh-shell-command"
 
 #### 会话Tab特性
 
-- **行式终端**：等宽回显 + 输入行
-- **控制键**：Ctrl+C/D/Z 发送原始控制字节到 shell
-- **命令历史**：方向键上下浏览已提交过的命令（纯客户端，最多 500 条）
-- **限制**：不支持 Tab 补全；完整 VT100/xterm（vim、htop）计划后续版本支持
+- **完整交互**：xterm.js 逐键接入 PTY，支持 vim、htop 和 ncurses 应用
+- **控制键**：Ctrl+C 中断、Ctrl+D 发送 EOF、Ctrl+Z 挂起，由 shell 处理
+- **补全与历史**：Tab 补全、↑/↓ 历史和命令行编辑使用 shell 自身功能
+- **输入与显示**：支持中文输入法、粘贴、ANSI 颜色、光标移动和进度条覆盖
+- **尺寸同步**：调整浮窗大小会同步终端行列数；切换到历史Tab保留现场
+- **退出与断线**：shell 自然退出自动保存历史；断线后停止输入，可关闭会话再重新打开
 
 #### 历史Tab工作流程
 
@@ -200,7 +226,7 @@ dsh plugin --profile web add "link:/path/to/dsh-shell-command"
 
 - **选择合适的工具**：单命令且需要立即反馈用 `/!`；探索性工作流程且稍后决定是否分析用 `/terminal`
 - **空会话不持久化**：打开 `/terminal` 但没输入任何命令，不会创建历史记录（这是设计如此，避免混乱）
-- **方向键是你的朋友**：终端输入行中，↑/↓ 可回顾最近 500 条命令（客户端、会话级别）
+- **补全与历史**：在终端中使用 Tab 和 ↑/↓；历史保存策略由当前 shell 配置决定
 - **说明增加上下文**：好的说明（「对比错误信息」或「关注性能指标」）帮助模型更有效地分析
 - **选择性分析**：不必分析每个终端会话——只引用与当前问题相关的内容
 - **历史是每个会话独立的**：每个 DSH 对话有自己的终端历史；它们不会混在一起
@@ -248,6 +274,25 @@ mkdir -p node_modules/@deepseek-ai
 ln -s "$HOME/.dsh/profiles/node_modules/@deepseek-ai/"* node_modules/@deepseek-ai/
 ```
 
+### 客户端构建与交互验收
+
+客户端源码位于 `src/`，`lib/client.js` 是提交并随包分发的生成文件。
+源码构建使用 tsdown，需要 Node 22.18+、24.11+ 或 26+；已发布包的运行环境仍支持 Node >=22。
+修改客户端后执行：
+
+```sh
+npm run build
+npm test
+npx playwright install chromium
+npm run test:browser
+```
+
+构建使用 tsdown，xterm、FitAddon 与 CSS 都打入同一个 DSH 加载器入口，React 和
+DSH 服务由宿主提供。浏览器测试在临时目录中启动真实 bash PTY，并测试实际生成的
+客户端；需要 Chromium 和本机监听权限。可用时同时验证 vim/htop。
+可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指定已安装的 Chromium。
+本地初始化也会构建源码；仅安装已发布包时直接使用随包产物。
+
 ## 常见问题 FAQ
 
 **问：何时该用 `/!` 而非 `/terminal`？**  
@@ -262,14 +307,14 @@ ln -s "$HOME/.dsh/profiles/node_modules/@deepseek-ai/"* node_modules/@deepseek-a
 **问：可以手动删除历史记录吗？**  
 答：可以，直接从 `.dsh-shell-transcripts/` 删除对应的 `.log` 和 `.meta.json` 文件。历史Tab每次打开时从磁盘读取。
 
-**问：为什么 vim/htop/ncurses 在 `/terminal` 里不能用？**  
-答：当前终端是行式的（回显 + 输入行），不是完整的 VT100/xterm 模拟器。完整终端模拟（使用 xterm.js）计划后续版本支持——需要引入构建流水线。
+**问：可以运行 vim/htop/ncurses 吗？**
+答：可以。会话Tab使用 xterm.js，按键直接发送给 PTY；程序需要安装在宿主机器上。
 
 **问：方向键命令回顾会跨会话持久化吗？**  
-答：↑/↓ 历史是客户端的，关闭浏览器Tab或面板后会重置。它的作用域是当前终端窗口，不保存到磁盘。
+答：↑/↓ 使用 shell 自身历史。是否写入历史文件、是否跨会话保留，由 shell 的配置决定。
 
 **问：「引用并分析」和直接在对话中问命令有什么区别？**  
-答：「引用并分析」会把实际的命令转录（输出、时间戳、退出码）作为结构化数据发给模型。在对话中问依赖你的描述，可能会遗漏细节。当你希望模型看到原始输出时，用引用分析。
+答：「引用并分析」会发送你的说明，以及选中转录的文件路径、时间戳和退出码，并要求模型读取这些文件中的原始输出。在对话中问依赖你的描述，可能会遗漏细节。
 
 **问：可以引用之前 DSH 对话的转录吗？**  
 答：不可以。终端历史是会话级别的。每个 DSH 对话有自己的 `.dsh-shell-transcripts/` 命名空间，历史Tab只显示当前 session ID 的记录。
@@ -283,17 +328,13 @@ ln -s "$HOME/.dsh/profiles/node_modules/@deepseek-ai/"* node_modules/@deepseek-a
 ## 已知限制
 
 - `/!` 的输出作为 plugin 来源的消息交付（在对话中可见）
-- 终端模式：仅行式显示（vim/htop 需要完整 xterm 模拟，后续版本计划支持）
+- 历史文件保存有界的原始终端字节，包含光标和全屏控制序列；历史预览用于查看日志，不是屏幕录像。
+- 刷新页面后从有界转录回放；发生截断时，无法保证还原全部先前的光标或全屏状态。
 - API 面锁定 `@deepseek-ai/dsh` `0.1.0-rc.x`；升级 DSH 时需锁定 peer 并回归
 
 ## 未来优化方向
 
 我们计划在后续版本中进行以下改进：
-
-### 完整终端模拟（迁移到 xterm.js）
-- **当前**：行式终端（回显 + 输入行）
-- **目标**：完整 VT100/xterm 模拟，支持 vim、htop、ncurses 应用、oh-my-posh 等丰富终端 UI
-- **需要**：引入构建流水线（webpack/vite）以打包 xterm.js 及其插件
 
 ### 国际化支持（i18n）
 - 多语言 UI 支持（英文、中文等）

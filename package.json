@@ -1,6 +1,6 @@
 {
   "name": "dsh-shell-command",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DeepSeek Harness (DSH) plugin: a /! command trigger (run one command, analyze output, inspired by Claude Code's ! gesture) and a /terminal command (interactive PTY popup with on-demand history reference).",
   "license": "MIT",
   "type": "module",
@@ -24,10 +24,15 @@
   "files": [
     "lib/**",
     "cordis.patch.yml",
-    "LICENSE"
+    "LICENSE",
+    "scripts/setup-local.mjs",
+    "README.zh.md",
+    "CHANGELOG.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   },
   "dsh": {
     "bundle": {
@@ -47,17 +52,19 @@
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
     "node-pty": "^1.1.0",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "@xterm/xterm": "6.0.0",
+    "@xterm/addon-fit": "0.11.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-input-trigger": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-subprocess": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-agent": "^0.1.0-rc.6 || ^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.6 || ^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6 || ^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-input-trigger": "^0.1.0-rc.6 || ^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6 || ^0.1.1-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6 || ^0.1.1-rc.2",
+    "@deepseek-ai/dsh-subprocess": "^0.1.0-rc.6 || ^0.1.1-rc.2"
   },
   "keywords": [
     "dsh",
@@ -68,5 +75,32 @@
     "slash-command",
     "terminal",
     "claude-code"
-  ]
+  ],
+  "scripts": {
+    "setup:local": "node scripts/setup-local.mjs",
+    "test": "node test/setup-local.mjs && node test/unit.mjs && node test/smoke.mjs && node test/smoke-terminal.mjs && node test/terminal-protocol.mjs && node test/regressions.mjs",
+    "prepublishOnly": "npm run build && npm test && npm run test:browser",
+    "build": "node scripts/build-client.mjs",
+    "test:browser": "node test/browser.mjs"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-client-connection": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-runtime": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-input-trigger": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-slots": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "tsdown": "0.23.1",
+    "playwright": "1.64.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
 }

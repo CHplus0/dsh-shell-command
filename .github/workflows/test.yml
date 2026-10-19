@@ -11,9 +11,11 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [22, 24]
+        node-version: [22, 24, 26]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,12 +24,29 @@ jobs:
       # Installed in a scratch dir, not the repo root: this package.json's own
       # peerDependencies (client-only @deepseek-ai/* packages included) make
       # npm's arborist either crash or silently drop the packages we actually
-      # asked for when they're installed alongside it.
+      # asked for when they're installed alongside it. Supply the host peers
+      # explicitly and skip npm's cyclic peer traversal (notably npm on Node 22).
       - run: |
-          mkdir /tmp/peer-install && cd /tmp/peer-install
-          npm init -y >/dev/null
-          npm install --no-save @deepseek-ai/dsh-llm @deepseek-ai/dsh-subprocess @deepseek-ai/schemastery
-          cp -r node_modules "$GITHUB_WORKSPACE/node_modules"
-      - run: node test/unit.mjs
-      - run: node test/smoke.mjs
-      - run: node test/smoke-terminal.mjs
+          mkdir /tmp/peer-install
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          writeFileSync('/tmp/peer-install/package.json', JSON.stringify({ private: true, dependencies: {
+            ...pkg.dependencies, ...pkg.devDependencies,
+            '@deepseek-ai/cordis': '4.0.2',
+            '@deepseek-ai/dsh-llm': '0.1.1-rc.2',
+            '@deepseek-ai/dsh-subprocess': '0.1.1-rc.2',
+            '@deepseek-ai/dsh-brand': '0.1.1-rc.2',
+            '@deepseek-ai/dsh-attachment': '0.1.1-rc.2',
+            '@deepseek-ai/dsh-invariants': '0.1.1-rc.2',
+            '@deepseek-ai/dsh-timeout': '0.1.1-rc.2',
+          } }));
+          NODE
+          npm install --prefix /tmp/peer-install --legacy-peer-deps --no-audit --no-fund
+          cp -r /tmp/peer-install/node_modules "$GITHUB_WORKSPACE/node_modules"
+      - run: npm run build
+      - run: npm test
+      - if: matrix.node-version == 24
+        run: node node_modules/playwright/cli.js install --with-deps chromium
+      - if: matrix.node-version == 24
+        run: npm run test:browser
